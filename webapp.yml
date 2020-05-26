@@ -1,0 +1,78 @@
+- hosts: localhost
+  connection: local
+  vars:
+    resource_group_webapp: myResourceGroupWebapp
+    resource_group: myResourceGroup
+    webapp_name: myLinuxWebApp
+    plan_name: myAppServicePlan
+    location: eastus
+    traffic_manager_profile_name: myTrafficManagerProfile
+    traffic_manager_endpoint_name: myTrafficManagerEndpoint
+
+  tasks:
+  - name: Create resource group
+    azure_rm_resourcegroup:
+        name: "{{ resource_group_webapp }}"
+        location: "{{ location }}"
+
+  - name: Create secondary resource group
+    azure_rm_resourcegroup:
+        name: "{{ resource_group }}"
+        location: "{{ location }}"
+
+  - name: Create App Service Plan
+    azure_rm_appserviceplan:
+      resource_group: "{{ resource_group }}"
+      name: "{{ plan_name }}"
+      location: "{{ location }}"
+      is_linux: true
+      sku: S1
+      number_of_workers: 1
+
+  - name: Create App Service on Linux with Java Runtime
+    azure_rm_webapp:
+        resource_group: "{{ resource_group_webapp }}"
+        name: "{{ webapp_name }}"
+        plan:
+          resource_group: "{{ resource_group }}"
+          name: "{{ plan_name }}"
+          is_linux: true
+          sku: S1
+          number_of_workers: 1
+        app_settings:
+          testkey: "testvalue"
+        frameworks:
+          - name: java
+            version: 8
+            settings:
+              java_container: "Tomcat"
+              java_container_version: "8.5"
+
+  - name: Get web app facts
+    azure_rm_webapp_facts:
+      resource_group: "{{ resource_group_webapp }}"
+      name: "{{ webapp_name }}"
+    register: webapp
+    
+  - name: Create Traffic Manager Profile
+    azure_rm_trafficmanagerprofile:
+      resource_group: "{{ resource_group_webapp }}"
+      name: "{{ traffic_manager_profile_name }}"
+      location: global
+      routing_method: performance
+      dns_config:
+        relative_name: "{{ traffic_manager_profile_name }}"
+        ttl:  60
+      monitor_config:
+        protocol: HTTPS
+        port: 80
+        path: '/'
+
+  - name: Add endpoint to traffic manager profile, using created web site
+    azure_rm_trafficmanagerendpoint:
+      resource_group: "{{ resource_group_webapp }}"
+      profile_name: "{{ traffic_manager_profile_name }}"
+      name: "{{ traffic_manager_endpoint_name }}"
+      type: azure_endpoints
+      location: "{{ location }}"
+      target_resource_id: "{{ webapp.webapps[0].id }}"
